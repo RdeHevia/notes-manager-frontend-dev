@@ -1,44 +1,50 @@
 /* eslint-disable max-lines-per-function */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import Note from './components/Note';
 import Notification from './components/Notification';
 import Footer from './components/Footer';
+import LoginForm from './components/LoginForm';
+import NoteForm from './components/NoteForm';
+import Togglable from './components/Togglable';
 import noteService from './services/notes';
+import loginService from './services/login';
 
 const App = () => {
   const [notes, setNotes] = useState([]);
-  const [newNote, setNewNote] = useState('a new note...');
   const [showAll, setShowAll] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [user, setUser] = useState(null); // name, username, token
 
-  const effect = () => {
+  useEffect(() => {
     noteService
       .getAll()
       .then(initialNotes => {
         setNotes(initialNotes);
       });
-  };
+  }, []);
 
-  useEffect(effect, []);
+  // set user value from localStorage if available (at first render only)
+  useEffect(() => {
+    const loggedUserJSON = window.localStorage.getItem('loggedNoteappUser');
+    if(loggedUserJSON) {
+      const user = JSON.parse(loggedUserJSON);
+      setUser(user);
+      noteService.setToken(user.token);
+    }
+  }, []);
 
-  console.log('render', notes.length, 'notes');
+  // creates a reference object
+  const noteFormRef = useRef();
 
-  const addNote = event => {
-    event.preventDefault();
-    const noteObject = {
-      content: newNote,
-      date: new Date().toISOString(),
-      important: Math.random() < 0.5
-    };
-
+  const addNote = noteObject => {
+    noteFormRef.current.toggleVisibility();
     noteService
       .create(noteObject)
       .then(returnedNote => {
         setNotes(notes.concat(returnedNote));
-        setNewNote('');
       });
   };
 
@@ -62,43 +68,57 @@ const App = () => {
       });
   };
 
-  const handleNoteChange = event => {
-    console.log(event.target.value);
-    setNewNote(event.target.value);
-  };
-
   const notesToShow = showAll ?
     notes : notes.filter(note => note.important);
 
-  const handleLogin = event => {
+  const handleLogin = async event => {
     event.preventDefault();
-    console.log('loggin in with', username, password);
+    
+    try {
+      const user = await loginService.login({
+        username, password
+      });
+
+      window.localStorage.setItem(
+        'loggedNoteappUser', JSON.stringify(user)
+      );
+
+      // set token value in the noteService module
+      noteService.setToken(user.token);
+      setUser(user);
+      // reset username and password in the form
+      setUsername('');
+      setPassword('');
+    } catch (exception) {
+      setErrorMessage('Wrong credentials');
+      setTimeout(() => {
+        setErrorMessage(null);
+      }, 5000);
+    }
   }
+
+  const handleLogOut = () => {
+    setUser(null);
+    window.localStorage.removeItem('loggedNoteappUser');
+  }
+
   return (
     <div>
       <h1>Notes</h1>
       <Notification message={errorMessage} />
-
-      <form onSubmit={handleLogin}>
-        <div>
-          username
-          <input
-            type="text"
-            name="Username"
-            value={username}
-            onChange={({ target }) => setUsername(target.value)}
-          />
-        </div>
-        <div>
-          password
-          <input
-            type="password"
-            name="Password"
-            value={password}
-            onChange={({ target }) => setPassword(target.value)}/>
-        </div>
-        <button type="submit">login</button>
-      </form>
+      {!user && 
+        <>
+          <Togglable buttonLabel='login'>
+            <LoginForm
+              username={username}
+              password={password}
+              handleUsernameChange={({ target }) => setUsername(target.value)}
+              handlePasswordChange={({ target }) => setPassword(target.value)}
+              handleSubmit={handleLogin}
+            />
+          </Togglable>
+        </>
+      }
 
       <div>
         <button onClick={() => setShowAll(!showAll)}>
@@ -113,10 +133,17 @@ const App = () => {
           />;
         })}
       </ul>
-      <form onSubmit={addNote}>
-        <input type="text" value={newNote} onChange={handleNoteChange}/>
-        <button type="submit">save</button>
-      </form>
+      {user &&
+      <>
+        <Togglable buttonLabel="new note" ref={noteFormRef}>
+            <NoteForm
+              createNote={addNote}
+            />
+        </Togglable>
+        <p>{user.name} logged-in</p>
+        <button onClick={handleLogOut}>Log out</button>      
+      </>
+      }
       <Footer />
     </div>
   );
